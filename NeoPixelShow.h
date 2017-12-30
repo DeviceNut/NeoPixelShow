@@ -24,10 +24,14 @@
 #ifndef NEOPIXEL_SHOW_H
 #define NEOPIXEL_SHOW_H
 
- #include <Arduino.h>
+#if defined(ARDUINO)
+#include "Arduino.h"
+#elif defined(SPARK)
+#include "Particle.h"
+#endif
 
-class NeoPixelShow {
-
+class NeoPixelShow
+{
  public:
 
   // Constructor: pin number
