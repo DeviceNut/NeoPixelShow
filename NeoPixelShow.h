@@ -28,8 +28,8 @@
 #include "Particle.h"
 #endif
 
-class NeoPixelShow {
-
+class NeoPixelShow
+{
  public:
 
   // Constructor: pin number
