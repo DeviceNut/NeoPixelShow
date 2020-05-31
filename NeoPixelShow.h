@@ -15,16 +15,18 @@
   License along with NeoPixel.  If not, see
   <http://www.gnu.org/licenses/>.
 
-  This minimal library only supports GRB data ordering, 800 KHz streaming,
-  and a modern version of the Arduino infrastructure. It does not support
-  the ESP8266 or ESP32 processors.
+  This minimal library only support GRB data ordering and 800 KHz streaming.
 
   --------------------------------------------------------------------*/
 
 #ifndef NEOPIXEL_SHOW_H
 #define NEOPIXEL_SHOW_H
 
- #include <Arduino.h>
+#if defined(ARDUINO)
+#include "Arduino.h"
+#elif defined(SPARK)
+#include "Particle.h"
+#endif
 
 class NeoPixelShow {
 

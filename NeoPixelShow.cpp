@@ -35,12 +35,22 @@
   <http://www.gnu.org/licenses/>.
 
   This minimal library only supports GRB data ordering, 800 KHz streaming,
-  and a modern version of the Arduino infrastructure. It does not support
-  the ESP8266 or ESP32 processors.
+  and a modern version of the Arduino infrastructure. 
 
   -------------------------------------------------------------------------*/
 
 #include "NeoPixelShow.h"
+
+#if defined(SPARK)
+#if (PLATFORM_ID == 6)
+STM32_Pin_Info* PIN_MAP2 = HAL_Pin_Map(); // Pointer required for highest access speed
+#define pinLO(_pin) (PIN_MAP2[_pin].gpio_peripheral->BSRRH = PIN_MAP2[_pin].gpio_pin)
+#define pinHI(_pin) (PIN_MAP2[_pin].gpio_peripheral->BSRRL = PIN_MAP2[_pin].gpio_pin)
+#else
+#error "Not supported by this library: Photon only"
+#endif
+#define pinSet(_pin, _hilo) (_hilo ? pinHI(_pin) : pinLO(_pin))
+#endif
 
 NeoPixelShow::NeoPixelShow(uint8_t p) : pin(p), endTime(0)
 {
@@ -51,6 +61,12 @@ NeoPixelShow::NeoPixelShow(uint8_t p) : pin(p), endTime(0)
   pinMode(pin, OUTPUT);
   digitalWrite(pin, LOW);
 }
+
+#ifdef ESP8266
+// ESP8266 show() is external to enforce ICACHE_RAM_ATTR execution
+extern "C" void ICACHE_RAM_ATTR espShow(
+  uint8_t pin, uint8_t *pixels, uint32_t numBytes);
+#endif // ESP8266
 
 void NeoPixelShow::show(uint8_t *pixels, uint16_t numBytes) {
 
@@ -75,9 +91,117 @@ void NeoPixelShow::show(uint8_t *pixels, uint16_t numBytes) {
   // state, computes 'pin high' and 'pin low' values, and writes these back
   // to the PORT register as needed.
 
+#if !defined(SPARK)
   noInterrupts(); // Need 100% focus on instruction timing
+#endif
 
-#if defined(__AVR__)
+#if defined(SPARK)
+
+  __disable_irq(); // Need 100% focus on instruction timing
+
+  volatile uint32_t
+    c,    // 24-bit pixel color
+    mask; // 8-bit mask
+  volatile uint16_t i = numBytes; // Output loop counter
+  volatile uint8_t
+    j,              // 8-bit inner loop counter
+    g,              // Current green byte value
+    r,              // Current red byte value
+    b;              // Current blue byte value
+
+    while(i) { // While bytes left... (3 bytes = 1 pixel)
+      mask = 0x800000; // reset the mask
+      i = i-3;         // decrement bytes remaining
+      g = *pixels++;   // Next green byte value
+      r = *pixels++;   // Next red byte value
+      b = *pixels++;   // Next blue byte value
+      c = ((uint32_t)g << 16) | ((uint32_t)r <<  8) | b; // Pack the next 3 bytes to keep timing tight
+      j = 0;        // reset the 24-bit counter
+      do {
+        pinSet(pin, HIGH); // HIGH
+        if (c & mask) { // if masked bit is high
+          // WS2812 spec             700ns HIGH
+          // Adafruit on Arduino    (meas. 812ns)
+          // This lib on Spark Core (meas. 804ns)
+          // This lib on Photon     (meas. 792ns)
+          asm volatile(
+            "mov r0, r0" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            ::: "r0", "cc", "memory");
+          // WS2812 spec             600ns LOW
+          // Adafruit on Arduino    (meas. 436ns)
+          // This lib on Spark Core (meas. 446ns)
+          // This lib on Photon     (meas. 434ns)
+          pinSet(pin, LOW); // LOW
+          asm volatile(
+            "mov r0, r0" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t"
+            ::: "r0", "cc", "memory");
+        }
+        else { // else masked bit is low
+          // WS2812 spec             350ns HIGH
+          // Adafruit on Arduino    (meas. 312ns)
+          // This lib on Spark Core (meas. 318ns)
+          // This lib on Photon     (meas. 308ns)
+          asm volatile(
+            "mov r0, r0" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t"
+            ::: "r0", "cc", "memory");
+          // WS2812 spec             800ns LOW
+          // Adafruit on Arduino    (meas. 938ns)
+          // This lib on Spark Core (meas. 944ns)
+          // This lib on Photon     (meas. 936ns)
+          pinSet(pin, LOW); // LOW
+          asm volatile(
+            "mov r0, r0" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t" "nop" "\n\t"
+            "nop" "\n\t" "nop" "\n\t"
+            ::: "r0", "cc", "memory");
+        }
+        mask >>= 1;
+      } while ( ++j < 24 ); // ... pixel done
+    } // end while(i) ... no more pixels
+
+  __enable_irq();
+
+#elif defined(__AVR__)
 
 // AVR MCUs -- ATmega & ATtiny (no XMEGA) ---------------------------------
 
@@ -776,6 +900,13 @@ void NeoPixelShow::show(uint8_t *pixels, uint16_t numBytes) {
 
 // END ARM ----------------------------------------------------------------
 
+#elif defined(ESP8266)
+
+// ESP8266 ----------------------------------------------------------------
+
+  // ESP8266 show() is external to enforce ICACHE_RAM_ATTR execution
+  espShow(pin, pixels, numBytes, true);
+
 #elif defined(__ARDUINO_ARC__)
 
 // Arduino 101  -----------------------------------------------------------
@@ -874,7 +1005,9 @@ void NeoPixelShow::show(uint8_t *pixels, uint16_t numBytes) {
 
 // END ARCHITECTURE SELECT ------------------------------------------------
 
+#if !defined(SPARK)
   interrupts();
+#endif
 
   endTime = micros(); // Save EOD time for latch on next call
 }
