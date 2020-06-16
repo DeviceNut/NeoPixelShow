@@ -10,8 +10,9 @@
   contributions by PJRC, Michael Miller and other members of the open
   source community.
 
-  Minified by Greg de Valois of Devicenut for use with PixelNut! devices,
-  with support for 400 KHz WS2811 or 4-byte pixels removed.
+  Minified by Greg de Valois of Devicenut for use with PixelNut! devices.
+  This minimal library only supports GRB data ordering, 800 KHz streaming,
+  and a modern version of the Arduino infrastructure. 
 
   Adafruit invests time and resources providing this open source code,
   please support Adafruit and open-source hardware by purchasing products
@@ -34,12 +35,16 @@
   License along with NeoPixel.  If not, see
   <http://www.gnu.org/licenses/>.
 
-  This minimal library only supports GRB data ordering, 800 KHz streaming,
-  and a modern version of the Arduino infrastructure. 
-
   -------------------------------------------------------------------------*/
 
 #include "NeoPixelShow.h"
+
+#if defined(ESP32)
+#define RMT_0TIME     14  // 0 bit high time
+#define RMT_1TIME     52  // 1 bit high time
+#define RMT_LOWTIME   52  // low time for either bit
+#define MAX_CHANNELS  8   // max of 8 RMT channels
+#endif
 
 #if defined(SPARK)
 #if (PLATFORM_ID == 6)
@@ -54,19 +59,42 @@ STM32_Pin_Info* PIN_MAP2 = HAL_Pin_Map(); // Pointer required for highest access
 
 NeoPixelShow::NeoPixelShow(uint8_t p) : pin(p), endTime(0)
 {
-#ifdef __AVR__
+  #ifdef __AVR__
   port    = portOutputRegister(digitalPinToPort(p));
   pinMask = digitalPinToBitMask(p);
-#endif
+  #elif !defined(ESP32)
   pinMode(pin, OUTPUT);
   digitalWrite(pin, LOW);
+  #endif
 }
 
-#ifdef ESP8266
-// ESP8266 show() is external to enforce ICACHE_RAM_ATTR execution
-extern "C" void ICACHE_RAM_ATTR espShow(
-  uint8_t pin, uint8_t *pixels, uint32_t numBytes);
-#endif // ESP8266
+#if defined(ESP32)
+bool NeoPixelShow::rmtInit(int index, uint16_t maxBytes)
+{
+  if (index >= MAX_CHANNELS) return false;
+
+  // 3 bytes/pixel * 8 bits/byte
+  pdata = (rmt_item32_t*)malloc(maxBytes * sizeof(rmt_item32_t) * 8);
+  if (pdata == NULL) return false;
+
+  channel = (rmt_channel_t)((int)RMT_CHANNEL_0 + index);
+  rmt_config_t config;
+  config.rmt_mode = RMT_MODE_TX;
+  config.channel = channel;
+  config.gpio_num = (gpio_num_t)pin;
+  config.mem_block_num = 3;
+  config.tx_config.loop_en = false;
+  config.tx_config.carrier_en = false;
+  config.tx_config.idle_output_en = true;
+  config.tx_config.idle_level = (rmt_idle_level_t)0;
+  config.clk_div = 2;
+
+  ESP_ERROR_CHECK(rmt_config(&config));
+  ESP_ERROR_CHECK(rmt_driver_install(channel, 0, 0));
+
+  return true;
+}
+#endif
 
 void NeoPixelShow::show(uint8_t *pixels, uint16_t numBytes)
 {
@@ -91,13 +119,37 @@ void NeoPixelShow::show(uint8_t *pixels, uint16_t numBytes)
   // state, computes 'pin high' and 'pin low' values, and writes these back
   // to the PORT register as needed.
 
-#if !defined(SPARK)
-  noInterrupts(); // Need 100% focus on instruction timing
-#endif
-
-#if defined(SPARK)
-
+  #if !defined(ESP_32)
+  #if defined(SPARK)
   __disable_irq(); // Need 100% focus on instruction timing
+  #else
+  noInterrupts(); // Need 100% focus on instruction timing
+  #endif
+  #endif
+
+#if defined(ESP32)
+
+  rmt_item32_t *p = pdata;
+  for (int i = 0; i < numBytes/3; ++i)
+  {
+    for (int j = 0; j < 3; ++j, ++pixels)
+    {
+      byte data = *pixels;
+      byte mask = 0x80;
+
+      for (int bit = 0; bit < 8; ++bit, ++p)
+      {
+        *p = (data & mask) ? (rmt_item32_t){{{RMT_1TIME, 1, RMT_LOWTIME, 0}}} :
+                             (rmt_item32_t){{{RMT_0TIME, 1, RMT_LOWTIME, 0}}};
+        mask >>= 1;
+      }
+    }
+  }
+
+  ESP_ERROR_CHECK(rmt_write_items(channel, pdata, (numBytes * 8), false));
+  ESP_ERROR_CHECK(rmt_wait_tx_done(channel, portMAX_DELAY));
+
+#elif defined(SPARK)
 
   volatile uint32_t
     c,    // 24-bit pixel color
@@ -198,8 +250,6 @@ void NeoPixelShow::show(uint8_t *pixels, uint16_t numBytes)
         mask >>= 1;
       } while ( ++j < 24 ); // ... pixel done
     } // end while(i) ... no more pixels
-
-  __enable_irq();
 
 #elif defined(__AVR__)
 
@@ -900,13 +950,6 @@ void NeoPixelShow::show(uint8_t *pixels, uint16_t numBytes)
 
 // END ARM ----------------------------------------------------------------
 
-#elif defined(ESP8266)
-
-// ESP8266 ----------------------------------------------------------------
-
-  // ESP8266 show() is external to enforce ICACHE_RAM_ATTR execution
-  espShow(pin, pixels, numBytes, true);
-
 #elif defined(__ARDUINO_ARC__)
 
 // Arduino 101  -----------------------------------------------------------
@@ -1001,13 +1044,19 @@ void NeoPixelShow::show(uint8_t *pixels, uint16_t numBytes)
     }
   }
 
+#else
+#error("No processor selected for NeoPixelShow")
 #endif
 
 // END ARCHITECTURE SELECT ------------------------------------------------
 
-#if !defined(SPARK)
+  #if !defined(ESP_32)
+  #if defined(SPARK)
+  __enable_irq();
+  #else
   interrupts();
-#endif
+  #endif
+  #endif
 
   endTime = micros(); // Save EOD time for latch on next call
 }

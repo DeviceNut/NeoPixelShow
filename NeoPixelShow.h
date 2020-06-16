@@ -15,7 +15,7 @@
   License along with NeoPixel.  If not, see
   <http://www.gnu.org/licenses/>.
 
-  This minimal library only support GRB data ordering and 800 KHz streaming.
+  This minimal library only supports GRB data ordering and 800 KHz streaming.
 
   --------------------------------------------------------------------*/
 
@@ -28,12 +28,21 @@
 #include "Particle.h"
 #endif
 
+#if defined(ESP32)
+#include "driver/rmt.h"
+#include <stdint.h>
+#endif
+
 class NeoPixelShow
 {
  public:
 
   // Constructor: pin number
   NeoPixelShow(uint8_t p);
+
+  #if defined(ESP32)
+  bool rmtInit(int index, uint16_t maxBytes);
+  #endif
 
   void show(uint8_t *pixels, uint16_t numBytes);
   inline bool canShow(void) { return (micros() - endTime) >= 50L; }
@@ -43,10 +52,14 @@ class NeoPixelShow
   int8_t pin;               // Output pin number
   uint32_t endTime;         // Latch timing reference
 
-#ifdef __AVR__
+  #if defined(ESP32)
+  rmt_channel_t channel;    // RMT channel to use
+  rmt_item32_t *pdata;      // RMT signal data
+
+  #elif defined(__AVR__)
   volatile uint8_t *port;   // Output PORT register
   uint8_t pinMask;          // Output PORT bitmask
-#endif
+  #endif
 };
 
 #endif // NEOPIXEL_SHOW_H
