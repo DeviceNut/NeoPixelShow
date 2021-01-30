@@ -22,11 +22,7 @@
 #ifndef NEOPIXEL_SHOW_H
 #define NEOPIXEL_SHOW_H
 
-#if defined(ARDUINO)
 #include "Arduino.h"
-#elif defined(SPARK)
-#include "Particle.h"
-#endif
 
 #if defined(ESP32)
 #include "driver/rmt.h"
