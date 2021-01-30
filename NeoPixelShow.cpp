@@ -40,10 +40,10 @@
 #include "NeoPixelShow.h"
 
 #if defined(ESP32)
-#define RMT_0_HIGH    14  // 0 bit high time
+#define RMT_0_HIGH    17  // 0 bit high time
 #define RMT_0_LOW     36  // 0 bit low time
 #define RMT_1_HIGH    36  // 1 bit high time
-#define RMT_1_LOW     14  // 1 bit low time
+#define RMT_1_LOW     17  // 1 bit low time
 #define MAX_CHANNELS  8   // max of 8 RMT channels
 #endif
 
