@@ -19,8 +19,7 @@
 
   --------------------------------------------------------------------*/
 
-#ifndef NEOPIXEL_SHOW_H
-#define NEOPIXEL_SHOW_H
+#pragma once
 
 #include "Arduino.h"
 
@@ -57,5 +56,3 @@ class NeoPixelShow
   uint8_t pinMask;          // Output PORT bitmask
   #endif
 };
-
-#endif // NEOPIXEL_SHOW_H
