@@ -1,19 +1,18 @@
 /*--------------------------------------------------------------------
-  This file is part of the Adafruit NeoPixel library.
+  This file is part of the NeoPixelShow library.
 
-  NeoPixel is free software: you can redistribute it and/or modify
+  NeoPixelShow is free software: you can redistribute it and/or modify
   it under the terms of the GNU Lesser General Public License as
   published by the Free Software Foundation, either version 3 of
   the License, or (at your option) any later version.
 
-  NeoPixel is distributed in the hope that it will be useful,
+  NeoPixelShow is distributed in the hope that it will be useful,
   but WITHOUT ANY WARRANTY; without even the implied warranty of
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
   GNU Lesser General Public License for more details.
 
   You should have received a copy of the GNU Lesser General Public
-  License along with NeoPixel.  If not, see
-  <http://www.gnu.org/licenses/>.
+  License along with NeoPixelShow. If not: <http://www.gnu.org/licenses/>.
 
   This minimal library only supports GRB data ordering and 800 KHz streaming.
 
@@ -21,7 +20,7 @@
 
 #pragma once
 
-#include "Arduino.h"
+#include <Arduino.h>
 
 #if defined(ESP32)
 #include "driver/rmt.h"

@@ -19,31 +19,30 @@
   from Adafruit!
 
   -------------------------------------------------------------------------
-  This file is part of the NeoPixelMin library.
+  This file is part of the NeoPixelShow library.
 
-  NeoPixel is free software: you can redistribute it and/or modify
+  NeoPixelShow is free software: you can redistribute it and/or modify
   it under the terms of the GNU Lesser General Public License as
   published by the Free Software Foundation, either version 3 of
   the License, or (at your option) any later version.
 
-  NeoPixel is distributed in the hope that it will be useful,
+  NeoPixelShow is distributed in the hope that it will be useful,
   but WITHOUT ANY WARRANTY; without even the implied warranty of
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
   GNU Lesser General Public License for more details.
 
   You should have received a copy of the GNU Lesser General Public
-  License along with NeoPixel.  If not, see
-  <http://www.gnu.org/licenses/>.
+  License along with NeoPixelShow. If not: <http://www.gnu.org/licenses/>.
 
   -------------------------------------------------------------------------*/
 
 #include "NeoPixelShow.h"
 
 #if defined(ESP32)
-#define RMT_0_HIGH    17  // 0 bit high time
-#define RMT_0_LOW     36  // 0 bit low time
-#define RMT_1_HIGH    36  // 1 bit high time
-#define RMT_1_LOW     17  // 1 bit low time
+#define RMT_0_HIGH    3   // 0 bit high time
+#define RMT_0_LOW     9   // 0 bit low time
+#define RMT_1_HIGH    9   // 1 bit high time
+#define RMT_1_LOW     3   // 1 bit low time
 #define MAX_CHANNELS  8   // max of 8 RMT channels
 #endif
 
@@ -59,12 +58,12 @@ NeoPixelShow::NeoPixelShow(uint8_t p) : pin(p), endTime(0)
 }
 
 #if defined(ESP32)
-bool NeoPixelShow::rmtInit(int index, uint16_t maxBytes)
+bool NeoPixelShow::rmtInit(int index, uint16_t numBytes)
 {
   if (index >= MAX_CHANNELS) return false;
 
   // 3 bytes/pixel * 8 bits/byte
-  pdata = (rmt_item32_t*)malloc(maxBytes * sizeof(rmt_item32_t) * 8);
+  pdata = (rmt_item32_t*)malloc(numBytes * sizeof(rmt_item32_t) * 8);
   if (pdata == NULL) return false;
 
   channel = (rmt_channel_t)((int)RMT_CHANNEL_0 + index);
@@ -73,13 +72,15 @@ bool NeoPixelShow::rmtInit(int index, uint16_t maxBytes)
   config.rmt_mode = RMT_MODE_TX;
   config.channel = channel;
   config.gpio_num = (gpio_num_t)pin;
-  config.mem_block_num = 3;
   config.tx_config.loop_en = false;
-  config.tx_config.carrier_en = false;
   config.tx_config.idle_output_en = true;
-  config.tx_config.idle_level = (rmt_idle_level_t)0;
+  config.tx_config.idle_level = RMT_IDLE_LEVEL_LOW;
+  config.tx_config.carrier_en = false;
+  config.tx_config.carrier_duty_percent = 50;
   config.tx_config.carrier_level = RMT_CARRIER_LEVEL_LOW;
-  config.clk_div = 2;
+  config.tx_config.carrier_freq_hz = 100;
+  config.mem_block_num = 1;
+  config.clk_div = 8;
 
   ESP_ERROR_CHECK(rmt_config(&config));
   ESP_ERROR_CHECK(rmt_driver_install(channel, 0, 0));
@@ -112,34 +113,31 @@ void NeoPixelShow::show(uint8_t *pixels, uint16_t numBytes)
   // to the PORT register as needed.
 
   #if !defined(ESP32)
-  noInterrupts(); // Need 100% focus on instruction timing
+  noInterrupts();  // Need 100% focus on instruction timing
   #endif
 
-#if defined(ESP32)
+  #if defined(ESP32)
 
   rmt_item32_t *p = pdata;
-  for (int i = 0; i < numBytes/3; ++i)
+  for (int i = 0; i < numBytes; ++i, ++pixels)
   {
-    for (int j = 0; j < 3; ++j, ++pixels)
-    {
-      byte data = *pixels;
-      byte mask = 0x80;
+    byte data = *pixels;
+    byte mask = 0x80;
 
-      for (int bit = 0; bit < 8; ++bit, ++p)
-      {
-        *p = (data & mask) ? (rmt_item32_t){{{RMT_1_HIGH, 1, RMT_1_LOW, 0}}} :
-                             (rmt_item32_t){{{RMT_0_HIGH, 1, RMT_0_LOW, 0}}};
-        mask >>= 1;
-      }
+    for (int bit = 0; bit < 8; ++bit, ++p)
+    {
+      *p = (data & mask) ? (rmt_item32_t){{{RMT_1_HIGH, 1, RMT_1_LOW, 0}}} :
+                           (rmt_item32_t){{{RMT_0_HIGH, 1, RMT_0_LOW, 0}}};
+      mask >>= 1;
     }
   }
 
   ESP_ERROR_CHECK(rmt_write_items(channel, pdata, (numBytes * 8), false));
   ESP_ERROR_CHECK(rmt_wait_tx_done(channel, portMAX_DELAY));
 
-#elif defined(__AVR__)
+  #elif defined(__AVR__)
 
-// AVR MCUs -- ATmega & ATtiny (no XMEGA) ---------------------------------
+  // AVR MCUs -- ATmega & ATtiny (no XMEGA) ---------------------------------
 
   volatile uint16_t
     i   = numBytes; // Loop counter
@@ -181,7 +179,7 @@ void NeoPixelShow::show(uint8_t *pixels, uint16_t numBytes)
     // 10 instruction clocks per bit: HHxxxxxLLL
     // OUT instructions:              ^ ^    ^   (T=0,2,7)
 
-#ifdef PORTD // PORTD isn't present on ATtiny85, etc.
+  #ifdef PORTD // PORTD isn't present on ATtiny85, etc.
 
     if(port == &PORTD) {
 
@@ -281,7 +279,7 @@ void NeoPixelShow::show(uint8_t *pixels, uint16_t numBytes)
 
     } else if(port == &PORTB) {
 
-#endif // PORTD
+  #endif // PORTD
 
       // Same as above, just switched to PORTB and stripped of comments.
       hi = PORTB |  pinMask;
@@ -359,12 +357,12 @@ void NeoPixelShow::show(uint8_t *pixels, uint16_t numBytes)
       : [port] "I" (_SFR_IO_ADDR(PORTB)), [ptr] "e" (ptr), [hi] "r" (hi),
         [lo] "r" (lo));
 
-#ifdef PORTD
+  #ifdef PORTD
     }    // endif PORTB
-#endif
+  #endif
 
-// 12 MHz(ish) AVR --------------------------------------------------------
-#elif (F_CPU >= 11100000UL) && (F_CPU <= 14300000UL)
+  // 12 MHz(ish) AVR --------------------------------------------------------
+  #elif (F_CPU >= 11100000UL) && (F_CPU <= 14300000UL)
 
     // In the 12 MHz case, an optimized 800 KHz datastream (no dead time
     // between bytes) requires a PORT-specific loop similar to the 8 MHz
@@ -375,7 +373,7 @@ void NeoPixelShow::show(uint8_t *pixels, uint16_t numBytes)
 
     volatile uint8_t next;
 
-#ifdef PORTD
+  #ifdef PORTD
 
     if(port == &PORTD) {
 
@@ -435,7 +433,7 @@ void NeoPixelShow::show(uint8_t *pixels, uint16_t numBytes)
 
     } else if(port == &PORTB) {
 
-#endif // PORTD
+  #endif // PORTD
 
       hi   = PORTB |  pinMask;
       lo   = PORTB & ~pinMask;
@@ -485,12 +483,12 @@ void NeoPixelShow::show(uint8_t *pixels, uint16_t numBytes)
         : [port] "I" (_SFR_IO_ADDR(PORTB)), [ptr] "e" (ptr), [hi] "r" (hi),
           [lo] "r" (lo));
 
-#ifdef PORTD
+  #ifdef PORTD
     }
-#endif
+  #endif
 
-// 16 MHz(ish) AVR --------------------------------------------------------
-#elif (F_CPU >= 15400000UL) && (F_CPU <= 19000000L)
+  // 16 MHz(ish) AVR --------------------------------------------------------
+  #elif (F_CPU >= 15400000UL) && (F_CPU <= 19000000L)
 
     // 20 inst. clocks per bit: HHHHHxxxxxxxxLLLLLLL
     // ST instructions:         ^   ^        ^       (T=0,5,13)
@@ -534,23 +532,24 @@ void NeoPixelShow::show(uint8_t *pixels, uint16_t numBytes)
         [hi]     "r" (hi),
         [lo]     "r" (lo));
 
-#else
-#error("CPU SPEED NOT SUPPORTED")
-#endif // end F_CPU ifdefs on __AVR__
+  #else
+  #error("CPU SPEED NOT SUPPORTED")
+  #endif // end F_CPU ifdefs on __AVR__
 
-// END AVR ----------------------------------------------------------------
+  // END AVR ----------------------------------------------------------------
 
-#elif defined(__arm__)
+  #elif defined(__arm__)
 
-// ARM MCUs -- Teensy 3.0, 3.1, LC, Arduino Due ---------------------------
+  // ARM MCUs -- Teensy 3.0, 3.1, LC, Arduino Due ---------------------------
 
-#if defined(__MK20DX128__) || defined(__MK20DX256__) // Teensy 3.0 & 3.1
-#define CYCLES_800_T0H  (F_CPU / 4000000)
-#define CYCLES_800_T1H  (F_CPU / 1250000)
-#define CYCLES_800      (F_CPU /  800000)
-#define CYCLES_400_T0H  (F_CPU / 2000000)
-#define CYCLES_400_T1H  (F_CPU /  833333)
-#define CYCLES_400      (F_CPU /  400000)
+  #if defined(__MK20DX128__) || defined(__MK20DX256__) // Teensy 3.0 & 3.1
+
+  #define CYCLES_800_T0H  (F_CPU / 4000000)
+  #define CYCLES_800_T1H  (F_CPU / 1250000)
+  #define CYCLES_800      (F_CPU /  800000)
+  #define CYCLES_400_T0H  (F_CPU / 2000000)
+  #define CYCLES_400_T1H  (F_CPU /  833333)
+  #define CYCLES_400      (F_CPU /  400000)
 
   uint8_t          *p   = pixels,
                    *end = p + numBytes, pix, mask;
@@ -660,11 +659,11 @@ void NeoPixelShow::show(uint8_t *pixels, uint16_t numBytes)
 	: [bitmask] "r" (bitmask),
 	  [reg] "r" (reg)
   );
-#else
-#error("Sorry, only 48 MHz is supported, please set Tools > CPU Speed to 48 MHz")
-#endif // F_CPU == 48000000
+  #else
+  #error("Sorry, only 48 MHz is supported, please set Tools > CPU Speed to 48 MHz")
+  #endif // F_CPU == 48000000
 
-#elif defined(__SAMD21G18A__) // Arduino Zero
+  #elif defined(__SAMD21G18A__) // Arduino Zero
 
   // Tried this with a timer/counter, couldn't quite get adequate
   // resolution.  So yay, you get a load of goofball NOPs...
@@ -705,7 +704,7 @@ void NeoPixelShow::show(uint8_t *pixels, uint16_t numBytes)
       }
     }
 
-#elif defined (ARDUINO_STM32_FEATHER) // FEATHER WICED (120MHz)
+  #elif defined (ARDUINO_STM32_FEATHER) // FEATHER WICED (120MHz)
 
   // Tried this with a timer/counter, couldn't quite get adequate
   // resolution.  So yay, you get a load of goofball NOPs...
@@ -779,7 +778,7 @@ void NeoPixelShow::show(uint8_t *pixels, uint16_t numBytes)
       }
     }
 
-#else // Other ARM architecture -- Presumed Arduino Due
+  #else // Other ARM architecture -- Presumed Arduino Due
 
   #define SCALE      VARIANT_MCK / 2UL / 1000000UL
   #define INST       (2UL * F_CPU / VARIANT_MCK)
@@ -832,18 +831,18 @@ void NeoPixelShow::show(uint8_t *pixels, uint16_t numBytes)
   while(*timeValue < period); // Wait for last bit
   TC_Stop(TC1, 0);
 
-#endif // end Due
+  #endif // end Due
 
-// END ARM ----------------------------------------------------------------
+  // END ARM ----------------------------------------------------------------
 
-#elif defined(__ARDUINO_ARC__)
+  #elif defined(__ARDUINO_ARC__)
 
-// Arduino 101  -----------------------------------------------------------
+  // Arduino 101  -----------------------------------------------------------
 
-#define NOPx7 { __builtin_arc_nop(); \
-  __builtin_arc_nop(); __builtin_arc_nop(); \
-  __builtin_arc_nop(); __builtin_arc_nop(); \
-  __builtin_arc_nop(); __builtin_arc_nop(); }
+  #define NOPx7 { __builtin_arc_nop(); \
+    __builtin_arc_nop(); __builtin_arc_nop(); \
+    __builtin_arc_nop(); __builtin_arc_nop(); \
+    __builtin_arc_nop(); __builtin_arc_nop(); }
 
   PinDescription *pindesc = &g_APinDescription[pin];
   register uint32_t loop = 8 * numBytes; // one loop to handle all bytes and all bits
@@ -930,11 +929,11 @@ void NeoPixelShow::show(uint8_t *pixels, uint16_t numBytes)
     }
   }
 
-#else
-#error("No processor selected for NeoPixelShow")
-#endif
+  #else
+  #error("No processor selected for NeoPixelShow")
+  #endif
 
-// END ARCHITECTURE SELECT ------------------------------------------------
+  // END ARCHITECTURE SELECT ------------------------------------------------
 
   #if !defined(ESP32)
   interrupts();
